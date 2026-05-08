@@ -3,7 +3,8 @@
   "name": "HR Interview Copilot",
   "version": "1.0.0",
   "description": "AI-assisted overlay for HR recruiters during Google Meet interviews.",
-  "permissions": [],
+  "permissions": ["microphone"],
+  "host_permissions": ["http://localhost:8000/*"],
   "content_scripts": [
     {
       "matches": ["https://meet.google.com/*"],
