@@ -50,6 +50,25 @@ export default function Sidebar({ activePage, onNavigate }) {
 
       {/* Nav */}
       <nav style={{ flex: 1, padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {/* Copilot button */}
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('open-copilot'))}
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+            padding: '10px 14px', borderRadius: 10, marginBottom: 8,
+            background: 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(139,92,246,0.2))',
+            border: '1px solid rgba(99,102,241,0.3)',
+            color: '#a5b4fc', fontWeight: 700, fontSize: 13, cursor: 'pointer',
+            transition: 'all var(--transition)',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(99,102,241,0.35), rgba(139,92,246,0.35))'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(99,102,241,0.25)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(139,92,246,0.2))'; e.currentTarget.style.boxShadow = 'none' }}
+        >
+          <span style={{ fontSize: 16 }}>🤖</span>
+          HR Copilot
+          <span style={{ marginLeft: 'auto', fontSize: 10, background: 'rgba(99,102,241,0.3)', padding: '2px 7px', borderRadius: 99, fontWeight: 600, letterSpacing: '0.05em' }}>AI</span>
+        </button>
+
         <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', padding: '4px 8px 8px' }}>
           Navigation
         </div>

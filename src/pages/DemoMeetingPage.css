@@ -1,0 +1,217 @@
+/* ── Page shell ─────────────────────────────────────────── */
+.meeting-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #0d0d1a;
+  overflow: hidden;
+}
+
+/* ── Top bar ────────────────────────────────────────────── */
+.meeting-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: #13132b;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.meeting-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.meeting-rec-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: blink 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+.meeting-rec-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ef4444;
+  letter-spacing: 1px;
+}
+
+.meeting-topbar-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.meeting-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #e2e8f0;
+  letter-spacing: 0.1px;
+}
+
+.meeting-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.meeting-duration {
+  font-size: 13px;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5px;
+}
+
+.meeting-info-chip {
+  font-size: 11px;
+  font-weight: 600;
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+
+/* ── Participant grid ───────────────────────────────────── */
+.meeting-grid {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 40px 24px;
+}
+
+.meeting-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: 320px;
+  height: 220px;
+  background: #16162e;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.meeting-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 1px;
+  flex-shrink: 0;
+}
+
+.meeting-card-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.meeting-card-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.meeting-card-role {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.meeting-muted-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-size: 14px;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+
+/* ── Controls bar ───────────────────────────────────────── */
+.meeting-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 24px;
+  background: #13132b;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.meeting-ctrl-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+  color: #94a3b8;
+  font-family: inherit;
+}
+
+.meeting-ctrl-btn.active {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: #a5b4fc;
+}
+
+.meeting-ctrl-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.meeting-ctrl-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.meeting-ctrl-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.meeting-end-btn {
+  padding: 10px 22px;
+  background: #ef4444;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  font-family: inherit;
+  margin-left: 12px;
+  transition: background 0.15s;
+  letter-spacing: 0.2px;
+}
+
+.meeting-end-btn:hover {
+  background: #dc2626;
+}
