@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import DemoMeetingPage from './pages/DemoMeetingPage';
 import InterviewCopilotOverlay from './components/overlay/InterviewCopilotOverlay';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -68,8 +67,6 @@ function AppInner() {
         {renderPage()}
       </main>
 
-      {/* Overlay Components */}
-      <DemoMeetingPage />
       <InterviewCopilotOverlay />
     </div>
   );
