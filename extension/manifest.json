@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "HR Interview Copilot",
+  "version": "1.0.0",
+  "description": "AI-assisted overlay for HR recruiters during Google Meet interviews.",
+  "permissions": [],
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["contentScript.js"],
+      "css": ["overlay.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

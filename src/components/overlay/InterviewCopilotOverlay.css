@@ -1,0 +1,313 @@
+/* ── Overlay container ─────────────────────────────────── */
+.copilot-overlay {
+  position: fixed;
+  z-index: 9999;
+  width: 360px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.35),
+    0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: box-shadow 0.2s ease;
+  user-select: none;
+}
+
+.copilot-overlay.dragging {
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.45),
+    0 4px 16px rgba(0, 0, 0, 0.3);
+  cursor: grabbing;
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+.copilot-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: #1e1b4b;
+  cursor: grab;
+  flex-shrink: 0;
+}
+
+.copilot-header:active {
+  cursor: grabbing;
+}
+
+.copilot-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.copilot-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.copilot-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.copilot-status-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: rgba(99, 102, 241, 0.25);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.copilot-header-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.copilot-icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #a5b4fc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  font-size: 16px;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s;
+}
+
+.copilot-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+/* ── Scrollable body ────────────────────────────────────── */
+.copilot-body {
+  overflow-y: auto;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: #e0e0e0 transparent;
+}
+
+.copilot-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.copilot-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.copilot-body::-webkit-scrollbar-thumb {
+  background: #ddd;
+  border-radius: 4px;
+}
+
+/* ── Sections ───────────────────────────────────────────── */
+.copilot-section {
+  padding: 12px 14px;
+  border-bottom: 1px solid #f1f1f5;
+}
+
+.copilot-section:last-child {
+  border-bottom: none;
+}
+
+.copilot-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #9ca3af;
+  margin-bottom: 6px;
+}
+
+/* ── Current Focus ──────────────────────────────────────── */
+.copilot-focus-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e1b4b;
+  background: #ede9fe;
+  padding: 5px 10px;
+  border-radius: 20px;
+  border: 1px solid #c4b5fd;
+}
+
+.copilot-focus-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6366f1;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.75); }
+}
+
+/* ── Transcript ─────────────────────────────────────────── */
+.copilot-transcript-box {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 9px 11px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #374151;
+}
+
+.copilot-transcript-speaker {
+  font-weight: 700;
+  color: #6366f1;
+}
+
+/* ── AI Insight ─────────────────────────────────────────── */
+.copilot-insight-box {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 9px 11px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #78350f;
+}
+
+/* ── Follow-up ──────────────────────────────────────────── */
+.copilot-followup-box {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 9px 11px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #14532d;
+  font-style: italic;
+}
+
+/* ── Red Flag ───────────────────────────────────────────── */
+.copilot-redflag-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-radius: 8px;
+  padding: 9px 11px;
+}
+
+.copilot-redflag-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.copilot-redflag-text {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #9f1239;
+  font-weight: 500;
+}
+
+/* ── Footer ─────────────────────────────────────────────── */
+.copilot-footer {
+  padding: 8px 14px;
+  background: #f9fafb;
+  border-top: 1px solid #f1f1f5;
+  flex-shrink: 0;
+}
+
+.copilot-footer-text {
+  font-size: 10.5px;
+  color: #9ca3af;
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* ── Minimized pill ─────────────────────────────────────── */
+.copilot-pill {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #1e1b4b;
+  border-radius: 30px;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  transition: transform 0.15s, box-shadow 0.15s;
+  border: none;
+  color: #ffffff;
+  font-family: inherit;
+}
+
+.copilot-pill:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+}
+
+.copilot-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #a5b4fc;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.copilot-pill-label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+/* ── Reopen button ──────────────────────────────────────── */
+.copilot-reopen-btn {
+  position: fixed;
+  bottom: 28px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: #1e1b4b;
+  border-radius: 10px;
+  cursor: pointer;
+  border: none;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.copilot-reopen-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+}
+
+.copilot-reopen-icon {
+  font-size: 16px;
+}

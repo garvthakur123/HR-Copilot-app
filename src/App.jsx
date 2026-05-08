@@ -1,9 +1,14 @@
-import React from 'react'
+import React from 'react';
+import DemoMeetingPage from './pages/DemoMeetingPage';
+import InterviewCopilotOverlay from './components/overlay/InterviewCopilotOverlay';
 
 function App() {
   return (
-    <div>App</div>
-  )
+    <>
+      <DemoMeetingPage />
+      <InterviewCopilotOverlay />
+    </>
+  );
 }
 
-export default App
+export default App;
