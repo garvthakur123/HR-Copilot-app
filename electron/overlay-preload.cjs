@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld('overlayAPI', {
   // Desktop/screen sources for system audio capture
   getDesktopSources: () => ipcRenderer.invoke('get-desktop-sources'),
 
+  // Permissions
+  checkPermissions: () => ipcRenderer.invoke('check-permissions'),
+  requestMicAccess: () => ipcRenderer.invoke('request-mic-access'),
+
   // Deepgram via Node https — no CORS, no web security restrictions
   // audioData: Uint8Array, mimeType: string, dgKey: string → Promise<string>
   transcribe: (audioData, mimeType, dgKey) =>

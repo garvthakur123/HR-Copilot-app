@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, screen, desktopCapturer, session } = require('electron')
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, desktopCapturer, session, systemPreferences, dialog } = require('electron')
 const path = require('path')
 const https = require('https')
 
@@ -184,7 +184,7 @@ ipcMain.on('overlay-set-opacity', (_, val) => {
 
 ipcMain.handle('overlay-get-opacity', () => overlayOpacity)
 
-// ── IPC: system audio sources ─────────────────────────────────
+// ── IPC: system audio & permissions ───────────────────────────
 ipcMain.handle('select-file', async (event) => {
   // Use a slight delay to ensure click events are settled
   await new Promise(r => setTimeout(r, 100))
@@ -206,11 +206,43 @@ ipcMain.handle('select-file', async (event) => {
 
 ipcMain.handle('get-desktop-sources', async () => {
   try {
-    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] })
+    const sources = await desktopCapturer.getSources({ 
+      types: ['screen', 'window'],
+      thumbnailSize: { width: 0, height: 0 } // optimization: we don't need thumbnails
+    })
     return sources.map(s => ({ id: s.id, name: s.name }))
-  } catch {
+  } catch (err) {
+    console.error('Error getting desktop sources:', err)
     return []
   }
+})
+
+ipcMain.handle('check-permissions', async () => {
+  if (process.platform !== 'darwin') {
+    return { microphone: 'granted', screen: 'granted' }
+  }
+
+  const micStatus = systemPreferences.getMediaAccessStatus('microphone')
+  let screenStatus = 'unknown'
+  
+  // systemPreferences.getMediaAccessStatus('screen') is available in Electron 16+
+  try {
+    screenStatus = systemPreferences.getMediaAccessStatus('screen')
+  } catch (e) {
+    // Fallback if not available
+  }
+
+  return { microphone: micStatus, screen: screenStatus }
+})
+
+ipcMain.handle('request-mic-access', async () => {
+  if (process.platform !== 'darwin') return true
+  
+  const status = systemPreferences.getMediaAccessStatus('microphone')
+  if (status === 'granted') return true
+  if (status === 'denied') return false
+  
+  return await systemPreferences.askForMediaAccess('microphone')
 })
 
 // ── IPC: Deepgram transcription via Node https ────────────────

@@ -221,9 +221,6 @@ export default function Dashboard({ onNavigate }) {
               })}
             </div>
           )}
-          <button className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: 20, fontSize: 13 }} onClick={() => onNavigate('departments')}>
-            Manage Departments
-          </button>
         </div>
       </div>
     </div>

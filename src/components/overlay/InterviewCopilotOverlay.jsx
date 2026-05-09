@@ -53,46 +53,74 @@ async function getMicStream() {
 // Fallback: getDisplayMedia (shows a picker; user must enable "Share audio").
 async function getSpeakerStream() {
   if (IS_OVERLAY_WINDOW && window.overlayAPI?.getDesktopSources) {
+    // 1. Check permissions first (on macOS)
+    if (window.overlayAPI.checkPermissions) {
+      const { screen } = await window.overlayAPI.checkPermissions();
+      if (screen === 'denied') {
+        throw new Error('Screen recording permission denied. Please enable it in System Settings > Security & Privacy.');
+      }
+    }
+
     const sources = await window.overlayAPI.getDesktopSources();
     // Pick the first screen source (Entire Screen / Screen 1)
-    const screen = sources.find(s =>
+    const screenSource = sources.find(s =>
       /screen|display|entire/i.test(s.name)
     ) || sources[0];
-    if (!screen) throw new Error('No screen source found for audio capture.');
 
-    // Electron's chromeMediaSource approach — captures system audio on the screen
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        mandatory: {
-          chromeMediaSource: 'desktop',
-          chromeMediaSourceId: screen.id,
+    if (!screenSource) throw new Error('No screen source found for audio capture.');
+
+    try {
+      // Electron's chromeMediaSource approach — captures system audio on the screen
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: screenSource.id,
+          },
         },
-      },
-      video: {
-        mandatory: {
-          chromeMediaSource: 'desktop',
-          chromeMediaSourceId: screen.id,
-          maxWidth: 1,
-          maxHeight: 1,
+        // We MUST request video to get audio from desktop sources in many Electron versions
+        video: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: screenSource.id,
+            maxWidth: 1,
+            maxHeight: 1,
+          },
         },
-      },
-    });
-    // Discard video immediately — we only need audio
-    stream.getVideoTracks().forEach(t => t.stop());
-    const audioTracks = stream.getAudioTracks();
-    if (!audioTracks.length) throw new Error('Screen has no audio track. Play audio first.');
-    return new MediaStream(audioTracks);
+      });
+      // Discard video immediately — we only need audio
+      stream.getVideoTracks().forEach(t => t.stop());
+      const audioTracks = stream.getAudioTracks();
+      if (!audioTracks.length) {
+        stream.getTracks().forEach(t => t.stop());
+        throw new Error('System audio capture failed. Ensure "Share audio" is enabled if a picker appeared.');
+      }
+      return new MediaStream(audioTracks);
+    } catch (err) {
+      if (err.name === 'NotAllowedError' || err.message?.includes('Permission denied')) {
+        throw new Error('Permission denied by system. Please grant "Screen Recording" access to this app in System Settings.');
+      }
+      throw err;
+    }
   }
 
   // Web fallback: show screen picker with audio option
-  const stream = await navigator.mediaDevices.getDisplayMedia({
-    audio: true,
-    video: { width: 1, height: 1 },
-  });
-  stream.getVideoTracks().forEach(t => t.stop());
-  const audioTracks = stream.getAudioTracks();
-  if (!audioTracks.length) throw new Error('No audio shared. Tick "Share audio" in the screen picker.');
-  return new MediaStream(audioTracks);
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      audio: true,
+      video: { width: 1, height: 1 },
+    });
+    stream.getVideoTracks().forEach(t => t.stop());
+    const audioTracks = stream.getAudioTracks();
+    if (!audioTracks.length) {
+      stream.getTracks().forEach(t => t.stop());
+      throw new Error('No audio shared. You must tick "Share audio" in the screen picker.');
+    }
+    return new MediaStream(audioTracks);
+  } catch (err) {
+    if (err.name === 'NotAllowedError') throw new Error('Capture cancelled or permission denied.');
+    throw err;
+  }
 }
 
 
@@ -121,10 +149,34 @@ export default function InterviewCopilotOverlay({ overlayWindowMode = false }) {
   const [isRecordingMic, setIsRecordingMic] = useState(false);
   const [isRecordingSys, setIsRecordingSys] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [sessionId, setSessionId] = useState(() => localStorage.getItem('hr_copilot_active_session_id'));
 
   // Keep a ref to latest messages so async callbacks don't use stale closure
   const messagesRef = useRef(messages);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+  // Handle incoming WebSocket messages
+  useEffect(() => {
+    const handleMessage = (data) => {
+      // Assuming backend replies with type: 'chat_reply' or something similar
+      if (data.type === 'chat_reply' || data.reply) {
+        const replyContent = data.reply || data.content || '*(No content received)*';
+        setMessages(h => [...h, { role: 'assistant', content: replyContent }]);
+        setTyping(false);
+      }
+      // Capture sessionId if backend sends it
+      if (data.session_id) {
+        setSessionId(data.session_id);
+        localStorage.setItem('hr_copilot_active_session_id', data.session_id);
+      }
+      if (data.type === 'analyze_jd_cv' && data.session_id) {
+        setSessionId(data.session_id);
+        localStorage.setItem('hr_copilot_active_session_id', data.session_id);
+      }
+    };
+    addMessageHandler(handleMessage);
+    return () => removeMessageHandler(handleMessage);
+  }, [addMessageHandler, removeMessageHandler]);
 
   const dragOffset = useRef({ x: 0, y: 0 });
   const overlayRef = useRef(null);
@@ -204,9 +256,17 @@ export default function InterviewCopilotOverlay({ overlayWindowMode = false }) {
     setTyping(true);
 
     try {
-      await new Promise(r => setTimeout(r, 800)); // Simulate latency
-      const reply = '*(Backend integration pending...)*';
-      setMessages(h => [...h, { role: 'assistant', content: reply }]);
+      // Real backend integration
+      const sent = wsSendMessage({
+        type: 'chat',
+        content: q,
+        session_id: sessionId,
+        history: messagesRef.current.slice(-10) // Send recent context
+      });
+      if (!sent) {
+        throw new Error('WebSocket not connected');
+      }
+      // Reply will come through the message handler
     } catch (err) {
       setMessages(h => [...h, { role: 'assistant', content: `Error: ${err.message}` }]);
     }
@@ -222,26 +282,26 @@ export default function InterviewCopilotOverlay({ overlayWindowMode = false }) {
       const streamToStop = recorderRef.current.stream;
       const blob = await stopRecorder(recorderRef.current, chunksRef.current);
       if (streamToStop) streamToStop.getTracks().forEach(t => t.stop());
-      
+
       chunksRef.current = [];
       recorderRef.current = null;
 
       if (blob && blob.size > 500) {
         const words = await transcribeAudio(blob, dgKey);
-        
+
         let newMsgs = [];
         if (Array.isArray(words) && words.length > 0) {
           if (isMic) {
             // Group words by speaker
             let currentSpeaker = words[0].speaker;
             let currentText = [];
-            
+
             const getSpeakerLabel = (spk) => spk === 0 ? 'Speaker A' : 'Speaker B';
-            
+
             words.forEach(w => {
               if (w.speaker !== currentSpeaker) {
                 newMsgs.push({
-                  role: 'user', 
+                  role: 'user',
                   content: `**${getSpeakerLabel(currentSpeaker)}:** ${currentText.join(' ')}`
                 });
                 currentSpeaker = w.speaker;
@@ -249,10 +309,10 @@ export default function InterviewCopilotOverlay({ overlayWindowMode = false }) {
               }
               currentText.push(w.punctuated_word || w.word);
             });
-            
+
             if (currentText.length > 0) {
               newMsgs.push({
-                role: 'user', 
+                role: 'user',
                 content: `**${getSpeakerLabel(currentSpeaker)}:** ${currentText.join(' ')}`
               });
             }
@@ -264,10 +324,10 @@ export default function InterviewCopilotOverlay({ overlayWindowMode = false }) {
           // Fallback if main.cjs hasn't been restarted and returned a string
           newMsgs.push({ role: 'user', content: `**${isMic ? 'You (Mic)' : 'Speaker'}:** ${words}` });
         }
-        
+
         if (newMsgs.length > 0) {
           setMessages(h => [...h, ...newMsgs]);
-          
+
           setTyping(true);
           await new Promise(r => setTimeout(r, 800)); // Simulate latency
           const reply = '*(Backend integration pending...)*';
@@ -289,7 +349,14 @@ export default function InterviewCopilotOverlay({ overlayWindowMode = false }) {
       return;
     }
     if (!dgKey) { setShowSetup(true); return; }
+
     try {
+      // 1. Check/Request permission on macOS
+      if (IS_OVERLAY_WINDOW && window.overlayAPI?.requestMicAccess) {
+        const granted = await window.overlayAPI.requestMicAccess();
+        if (!granted) throw new Error('Microphone access denied by system.');
+      }
+
       const micStream = await getMicStream();
       activeStreams.current.push(micStream);
       micChunks.current = [];
@@ -301,7 +368,7 @@ export default function InterviewCopilotOverlay({ overlayWindowMode = false }) {
       mr.start(250);
       setIsRecordingMic(true);
     } catch (err) {
-      alert(`Mic error: ${err.message}`);
+      setMessages(h => [...h, { role: 'assistant', content: `Mic error: ${err.message}` }]);
     }
   }
 
@@ -311,6 +378,7 @@ export default function InterviewCopilotOverlay({ overlayWindowMode = false }) {
       return;
     }
     if (!dgKey) { setShowSetup(true); return; }
+
     try {
       const sysStream = await getSpeakerStream();
       activeStreams.current.push(sysStream);
@@ -323,7 +391,7 @@ export default function InterviewCopilotOverlay({ overlayWindowMode = false }) {
       mr.start(250);
       setIsRecordingSys(true);
     } catch (err) {
-      alert(`Speaker error: ${err.message}`);
+      setMessages(h => [...h, { role: 'assistant', content: `Speaker error: ${err.message}` }]);
     }
   }
 
@@ -372,8 +440,8 @@ export default function InterviewCopilotOverlay({ overlayWindowMode = false }) {
   const statusText = isRecording
     ? 'Recording… click to stop & send'
     : transcribing
-        ? 'Transcribing & sending…'
-        : 'Ready';
+      ? 'Transcribing & sending…'
+      : 'Ready';
 
   return (
     <div

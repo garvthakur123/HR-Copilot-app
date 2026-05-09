@@ -238,7 +238,9 @@ export default function CandidateDetail({ candidateId, onNavigate }) {
     // 3. Tell BE to load this candidate's context
     const payload = { type: 'analyze_jd_cv', session_id: sessionId }
     console.log('[HR Copilot] Sending analyze_jd_cv:', payload)
+    localStorage.setItem('hr_copilot_active_session_id', sessionId)
     setJoinStatus('Connecting...')
+
 
     function onAnalyzeResponse(data) {
       if (data.session_id === sessionId || data.type === 'analyze_jd_cv') {
