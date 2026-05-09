@@ -3,6 +3,7 @@ import InterviewCopilotOverlay from './components/overlay/InterviewCopilotOverla
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataProvider } from './contexts/DataContext';
+import { WSProvider } from './contexts/WSContext';
 
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -76,7 +77,9 @@ export default function App() {
   return (
     <AuthProvider>
       <DataProvider>
-        <AppInner />
+        <WSProvider>
+          <AppInner />
+        </WSProvider>
       </DataProvider>
     </AuthProvider>
   );

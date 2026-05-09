@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useData } from '../contexts/DataContext'
 import { useAuth } from '../contexts/AuthContext'
+import { useWS } from '../contexts/WSContext'
 import DateTimePicker from '../components/DateTimePicker'
 import { EmailPreviewModal } from '../components/EmailModal'
 import { sendInterviewEmail, buildEmailHTML } from '../utils/emailService'
@@ -204,7 +205,9 @@ function SField({ label, children }) {
 export default function CandidateDetail({ candidateId, onNavigate }) {
   const { getCandidate, departments, updateCandidate, deleteCandidate } = useData()
   const { user } = useAuth()
+  const { sendMessage, addMessageHandler, removeMessageHandler } = useWS()
   const [showSchedule, setShowSchedule] = useState(false)
+  const [joinStatus, setJoinStatus] = useState('') // feedback under the button
   const c = getCandidate(candidateId)
 
   if (!c) return (
@@ -218,6 +221,36 @@ export default function CandidateDetail({ candidateId, onNavigate }) {
   const sm = STATUS_META[c.status] || { label: c.status, cls: 'badge-default', color: '#818cf8' }
 
   function changeStatus(status) { updateCandidate(c.id, { status }) }
+
+  function handleJoinMeeting() {
+    // 1. Open the meeting link (or a new Google Meet if none is saved)
+    const meetUrl = c.meetingLink || 'https://meet.google.com/new'
+    window.open(meetUrl, '_blank')
+
+    // 2. Look up session_id from localStorage (written there when candidate was added)
+    const sessionId = localStorage.getItem(c.email)
+    if (!sessionId) {
+      console.warn('[HR Copilot] No session_id found for', c.email)
+      setJoinStatus('⚠ No session found for this candidate')
+      return
+    }
+
+    // 3. Tell BE to load this candidate's context
+    const payload = { type: 'analyze_jd_cv', session_id: sessionId }
+    console.log('[HR Copilot] Sending analyze_jd_cv:', payload)
+    setJoinStatus('Connecting...')
+
+    function onAnalyzeResponse(data) {
+      if (data.session_id === sessionId || data.type === 'analyze_jd_cv') {
+        console.log('[HR Copilot] analyze_jd_cv response from BE:', data)
+        setJoinStatus('✅ Interview context loaded')
+        removeMessageHandler(onAnalyzeResponse)
+      }
+    }
+    addMessageHandler(onAnalyzeResponse)
+    const sent = sendMessage(payload)
+    if (!sent) setJoinStatus('⚠ WS not connected — retrying...')
+  }
 
   const skills = c.skills ? c.skills.split(',').map(s => s.trim()).filter(Boolean) : []
 
@@ -282,6 +315,27 @@ export default function CandidateDetail({ candidateId, onNavigate }) {
             >
               <CalSvg size={14} color="#fff" /> {c.interviewDate ? 'Reschedule & Email' : 'Schedule Interview'}
             </button>
+
+            {/* Join Interview button */}
+            <button
+              onClick={handleJoinMeeting}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                width: '100%', padding: '9px 16px', border: 'none', borderRadius: 10,
+                cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                background: 'linear-gradient(135deg, #10b981, #059669)',
+                color: '#fff', boxShadow: '0 4px 14px rgba(16,185,129,0.35)',
+                transition: 'all var(--transition)',
+              }}
+            >
+              <VideoIcon size={14} color="#fff" /> Join Interview
+            </button>
+            {joinStatus && (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', width: '100%', textAlign: 'center' }}>
+                {joinStatus}
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
               <button className="btn-secondary" onClick={() => onNavigate('edit-' + c.id)} style={{ flex: 1, justifyContent: 'center' }}>
                 <EditIcon size={14} /> Edit

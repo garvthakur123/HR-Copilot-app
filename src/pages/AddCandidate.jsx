@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useData } from '../contexts/DataContext'
 import { useAuth } from '../contexts/AuthContext'
+import { useWS } from '../contexts/WSContext'
 import DateTimePicker from '../components/DateTimePicker'
 import { EmailPreviewModal } from '../components/EmailModal'
 import { buildEmailHTML, sendInterviewEmail } from '../utils/emailService'
@@ -44,6 +45,34 @@ function InputWithIcon({ icon, ...props }) {
 
 // ─────────────────────────────────────────────
 
+// Writes email → session_id to:
+//   1. localStorage (instant, available at runtime for CandidateDetail)
+//   2. src/data/sessionMap.json via Vite dev-server middleware (visible on disk for demos)
+async function generateMapper(email, sessionId) {
+  // 1. localStorage — always works in the browser
+  localStorage.setItem(email, sessionId)
+  console.log('[HR Copilot] localStorage saved:', email, '→', sessionId)
+
+  // 2. JSON file on disk (Vite dev server only)
+  try {
+    const res = await fetch('/dev/write-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, sessionId }),
+    })
+    const result = await res.json()
+    if (result.ok) {
+      console.log('[HR Copilot] sessionMap.json updated:', email, '→', sessionId)
+    } else {
+      console.warn('[HR Copilot] generateMapper (file write) failed:', result.error)
+    }
+  } catch (err) {
+    console.warn('[HR Copilot] generateMapper (file write) error — is Vite running?', err.message)
+  }
+}
+
+// ─────────────────────────────────────────────
+
 const EMPTY = {
   fullName: '', email: '', phone: '', position: '', departmentId: '',
   experience: '', location: '', githubUrl: '', linkedinUrl: '',
@@ -56,6 +85,7 @@ const EMPTY = {
 export default function AddCandidate({ onNavigate, editId }) {
   const { departments, addCandidate, updateCandidate, getCandidate } = useData()
   const { user } = useAuth()
+  const { sendMessage, addMessageHandler, removeMessageHandler } = useWS()
 
   const existing = editId ? getCandidate(editId) : null
   const [form, setForm] = useState(() => existing ? { ...EMPTY, ...existing } : { ...EMPTY })
@@ -91,6 +121,8 @@ export default function AddCandidate({ onNavigate, editId }) {
 
     const data = { ...form, addedBy: user?.name }
 
+    console.log('data-------->>>>', data)
+
     if (editId) {
       setSaving(true)
       await new Promise(r => setTimeout(r, 400))
@@ -103,6 +135,39 @@ export default function AddCandidate({ onNavigate, editId }) {
 
     // New candidate — show email preview first
     const dept = departments.find(d => d.id === form.departmentId)
+
+    // Build job_description from available form fields (no dedicated JD field in this form)
+    const jobDescription = [
+      form.position,
+      dept ? `Department: ${dept.name}` : '',
+      form.experience ? `Experience: ${form.experience}` : '',
+      form.skills ? `Required skills: ${form.skills}` : '',
+      form.location ? `Location: ${form.location}` : '',
+      form.noticePeriod ? `Notice period: ${form.noticePeriod}` : '',
+      form.expectedCTC ? `Expected CTC: ${form.expectedCTC}` : '',
+    ].filter(Boolean).join('. ')
+
+    // cv_data: resumeFile is stored as a base64 data-URL ("data:...;base64,<data>")
+    // Strip the prefix so the backend receives only the raw base64 binary string.
+    const cvData = form.resumeFile
+      ? (form.resumeFile.includes(',') ? form.resumeFile.split(',')[1] : form.resumeFile)
+      : ''
+
+    const wsPayload = { type: 'create_session', job_description: jobDescription, cv_data: cvData }
+    console.log('[HR Copilot] WS payload:', wsPayload)
+
+    // Register a one-time handler to capture the session_id from BE response
+    const email = form.email
+    function onCreateSessionResponse(data) {
+      if (data.type === 'create_session' && data.session_id) {
+        console.log('[HR Copilot] Session created, session_id:', data.session_id)
+        generateMapper(email, data.session_id)
+        removeMessageHandler(onCreateSessionResponse)
+      }
+    }
+    addMessageHandler(onCreateSessionResponse)
+    sendMessage(wsPayload)
+
     const html = buildEmailHTML({ candidate: data, department: dept, hrUser: user })
     setPendingData(data)
     setEmailHTML(html)
