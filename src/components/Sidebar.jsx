@@ -52,7 +52,15 @@ export default function Sidebar({ activePage, onNavigate }) {
       <nav style={{ flex: 1, padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
         {/* Copilot button */}
         <button
-          onClick={() => window.dispatchEvent(new CustomEvent('open-copilot'))}
+          onClick={() => {
+            // Electron two-window mode: show overlay window via IPC
+            if (window.copilotAPI?.openOverlay) {
+              window.copilotAPI.openOverlay()
+            } else {
+              // Web / single-window fallback: dispatch custom event
+              window.dispatchEvent(new CustomEvent('open-copilot'))
+            }
+          }}
           style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 10,
             padding: '10px 14px', borderRadius: 10, marginBottom: 8,

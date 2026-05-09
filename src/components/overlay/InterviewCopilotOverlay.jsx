@@ -3,144 +3,163 @@ import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import './InterviewCopilotOverlay.css';
 
-const INITIAL_POSITION = { x: window.innerWidth - 424, y: 80 };
+const INIT_POS = { x: window.innerWidth - 444, y: 80 };
+const DG_KEY_STORAGE = 'copilot_deepgram_key';  // Deepgram — audio transcription
 
-const WELCOME = `Hi! I'm your **HR Copilot**. Ask me anything about your pipeline — candidates, interviews, departments, or hiring insights. I'm here to help you move fast.`;
+const SUGGESTIONS = ['Pipeline summary', 'Interviews today', 'Who is shortlisted?', 'Hiring funnel', 'HR tips'];
 
-const SUGGESTIONS = [
-  'Pipeline summary',
-  'Interviews today',
-  'Who is shortlisted?',
-  'Top departments',
-  'Hiring progress',
-];
+const IS_OVERLAY_WINDOW = typeof window !== 'undefined' && !!window.overlayAPI;
+const IS_ELECTRON = typeof window !== 'undefined' && (!!window.copilotAPI || !!window.overlayAPI);
 
-function buildResponse(input, candidates, departments, user) {
-  const q = input.toLowerCase();
-  const now = new Date();
-
-  const statusCount = (s) => candidates.filter(c => c.status === s).length;
-  const todayList = candidates.filter(c => {
-    if (!c.interviewDate) return false;
-    return new Date(c.interviewDate).toDateString() === now.toDateString();
+// Deepgram transcription — POST raw audio bytes, no multipart needed
+// Uses Electron IPC (main process) when in overlay window → no CORS issues
+async function transcribeAudio(blob, dgKey) {
+  const contentType = blob.type.split(';')[0]; // strip codec params
+  if (IS_OVERLAY_WINDOW && window.overlayAPI?.transcribe) {
+    const arrayBuf = await blob.arrayBuffer();
+    return window.overlayAPI.transcribe(new Uint8Array(arrayBuf), contentType, dgKey);
+  }
+  // Web / dev-mode direct fetch
+  const res = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en&diarize=true', {
+    method: 'POST',
+    headers: { Authorization: `Token ${dgKey}`, 'Content-Type': contentType },
+    body: blob,
   });
-
-  if (q.includes('summary') || q.includes('overview') || q.includes('pipeline')) {
-    const hired = statusCount('hired');
-    const shortlisted = statusCount('shortlisted');
-    const pending = statusCount('pending');
-    const rejected = statusCount('rejected');
-    return `Here's your current pipeline overview:\n\n**Total candidates:** ${candidates.length}\n**Shortlisted:** ${shortlisted}\n**Hired:** ${hired}\n**Pending review:** ${pending}\n**Rejected:** ${rejected}\n\nYou have **${departments.length} departments** active. ${shortlisted > 0 ? `${shortlisted} candidate${shortlisted > 1 ? 's are' : ' is'} ready to move forward.` : 'No candidates shortlisted yet.'}`;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.err_msg || `Deepgram HTTP ${res.status}`);
   }
-
-  if (q.includes('today') || q.includes('interview today') || q.includes('schedule')) {
-    if (todayList.length === 0) return `No interviews scheduled for today. Want me to help you find candidates ready to schedule?`;
-    const names = todayList.map(c => `**${c.fullName}** — ${c.position}`).join('\n');
-    return `You have **${todayList.length} interview${todayList.length > 1 ? 's' : ''}** today:\n\n${names}\n\nMake sure all links and confirmations are sent!`;
-  }
-
-  if (q.includes('shortlist') || q.includes('shortlisted')) {
-    const list = candidates.filter(c => c.status === 'shortlisted');
-    if (list.length === 0) return `No candidates are shortlisted yet. Review pending candidates and move strong profiles to shortlisted.`;
-    const names = list.slice(0, 5).map(c => {
-      const dept = departments.find(d => d.id === c.departmentId);
-      return `**${c.fullName}** — ${c.position} (${dept?.name || 'Unknown'})`;
-    }).join('\n');
-    return `**${list.length} shortlisted candidate${list.length > 1 ? 's' : ''}:**\n\n${names}${list.length > 5 ? `\n\n...and ${list.length - 5} more.` : ''}`;
-  }
-
-  if (q.includes('hired') || q.includes('hire')) {
-    const list = candidates.filter(c => c.status === 'hired');
-    if (list.length === 0) return `No candidates marked as hired yet. Once interviews conclude, update their status to track your hiring success.`;
-    return `**${list.length} candidate${list.length > 1 ? 's' : ''} hired** so far. Great progress! Keep the pipeline warm for upcoming roles.`;
-  }
-
-  if (q.includes('department') || q.includes('dept') || q.includes('top')) {
-    if (departments.length === 0) return `No departments set up yet. Add departments first to organize your pipeline.`;
-    const ranked = departments
-      .map(d => ({ ...d, count: candidates.filter(c => c.departmentId === d.id).length }))
-      .sort((a, b) => b.count - a.count);
-    const list = ranked.slice(0, 4).map(d => `**${d.name}** — ${d.count} candidate${d.count !== 1 ? 's' : ''}`).join('\n');
-    return `Candidate distribution across departments:\n\n${list}\n\n**${ranked[0]?.name}** has the most activity.`;
-  }
-
-  if (q.includes('pending') || q.includes('review')) {
-    const list = candidates.filter(c => c.status === 'pending');
-    if (list.length === 0) return `No pending candidates — your review queue is clear!`;
-    return `**${list.length} candidate${list.length > 1 ? 's' : ''}** still pending review. Tip: review and shortlist strong profiles early to avoid losing them to competing offers.`;
-  }
-
-  if (q.includes('rejected') || q.includes('reject')) {
-    const count = statusCount('rejected');
-    return count === 0
-      ? `No rejections recorded yet.`
-      : `**${count} candidate${count > 1 ? 's' : ''}** have been rejected. Consider sending them a polite rejection email to maintain a positive employer brand.`;
-  }
-
-  if (q.includes('progress') || q.includes('hiring')) {
-    const total = candidates.length;
-    if (total === 0) return `Pipeline is empty. Start by adding candidates to track your hiring progress.`;
-    const hired = statusCount('hired');
-    const pct = total > 0 ? Math.round((hired / total) * 100) : 0;
-    return `**Hiring progress:** ${hired} of ${total} candidates converted to hired (${pct}%).\n\nFunnel breakdown:\n**Pending** → **Shortlisted** → **Hired**\n${statusCount('pending')} → ${statusCount('shortlisted')} → ${hired}`;
-  }
-
-  if (q.includes('help') || q.includes('what can')) {
-    return `Here's what I can help you with:\n\n• **Pipeline summary** — total counts by status\n• **Today's interviews** — who's scheduled\n• **Shortlisted candidates** — who's ready\n• **Department breakdown** — candidates per team\n• **Hiring progress** — funnel metrics\n• **Pending reviews** — what needs attention\n\nJust ask naturally — I'll figure it out!`;
-  }
-
-  if (q.includes('tip') || q.includes('suggest') || q.includes('advice') || q.includes('recommend')) {
-    const tips = [
-      `Tip: Follow up with shortlisted candidates within **48 hours** to keep their interest high.`,
-      `Tip: Schedule interviews in the morning — candidates are sharper and decision-makers are more available.`,
-      `Tip: Always send a confirmation email with the meeting link **24 hours before** the interview.`,
-      `Tip: Structured interviews with consistent questions reduce unconscious bias and improve hire quality.`,
-      `Tip: Track your offer acceptance rate — if it's low, compensation or experience might need adjustment.`,
-    ];
-    return tips[Math.floor(Math.random() * tips.length)];
-  }
-
-  // Default
-  const defaults = [
-    `I can help you analyze your hiring pipeline. Try asking: **"Who is shortlisted?"**, **"Any interviews today?"**, or **"Give me a pipeline summary"**.`,
-    `Good question! For best results, ask me about your candidates, interview schedule, or department metrics.`,
-    `I'm focused on your HR pipeline data. Ask me things like **"Show me pending reviews"**, **"Hiring progress"**, or **"Which departments have candidates?"**`,
-  ];
-  return defaults[Math.floor(Math.random() * defaults.length)];
+  const data = await res.json();
+  return data.results?.channels?.[0]?.alternatives?.[0]?.words || [];
+}
+// Stop a MediaRecorder and return a Blob using the recorder's actual MIME type
+function stopRecorder(recorder, chunks) {
+  const mimeType = recorder.mimeType || 'audio/webm';
+  return new Promise(resolve => {
+    recorder.addEventListener('stop', () => {
+      resolve(new Blob(chunks, { type: mimeType }));
+    }, { once: true });
+    if (recorder.state !== 'inactive') recorder.stop();
+    else resolve(new Blob(chunks, { type: mimeType }));
+  });
 }
 
-export default function InterviewCopilotOverlay() {
-  const { candidates, departments } = useData();
+// Get mic stream
+async function getMicStream() {
+  return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+}
+// Get speaker/system audio stream.
+// In Electron overlay window: use desktopCapturer → getUserMedia (chromeMediaSource).
+// Fallback: getDisplayMedia (shows a picker; user must enable "Share audio").
+async function getSpeakerStream() {
+  if (IS_OVERLAY_WINDOW && window.overlayAPI?.getDesktopSources) {
+    const sources = await window.overlayAPI.getDesktopSources();
+    // Pick the first screen source (Entire Screen / Screen 1)
+    const screen = sources.find(s =>
+      /screen|display|entire/i.test(s.name)
+    ) || sources[0];
+    if (!screen) throw new Error('No screen source found for audio capture.');
+
+    // Electron's chromeMediaSource approach — captures system audio on the screen
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        mandatory: {
+          chromeMediaSource: 'desktop',
+          chromeMediaSourceId: screen.id,
+        },
+      },
+      video: {
+        mandatory: {
+          chromeMediaSource: 'desktop',
+          chromeMediaSourceId: screen.id,
+          maxWidth: 1,
+          maxHeight: 1,
+        },
+      },
+    });
+    // Discard video immediately — we only need audio
+    stream.getVideoTracks().forEach(t => t.stop());
+    const audioTracks = stream.getAudioTracks();
+    if (!audioTracks.length) throw new Error('Screen has no audio track. Play audio first.');
+    return new MediaStream(audioTracks);
+  }
+
+  // Web fallback: show screen picker with audio option
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    audio: true,
+    video: { width: 1, height: 1 },
+  });
+  stream.getVideoTracks().forEach(t => t.stop());
+  const audioTracks = stream.getAudioTracks();
+  if (!audioTracks.length) throw new Error('No audio shared. Tick "Share audio" in the screen picker.');
+  return new MediaStream(audioTracks);
+}
+
+
+
+
+export default function InterviewCopilotOverlay({ overlayWindowMode = false }) {
   const { user } = useAuth();
 
-  const [isVisible, setIsVisible] = useState(false);
+  const [isVisible, setIsVisible] = useState(overlayWindowMode || IS_OVERLAY_WINDOW);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [position, setPosition] = useState(INITIAL_POSITION);
+  const [pos, setPos] = useState(INIT_POS);
   const [isDragging, setIsDragging] = useState(false);
-  const [messages, setMessages] = useState([{ id: 0, role: 'ai', text: WELCOME }]);
+
+  const [dgKey, setDgKey] = useState(() => localStorage.getItem(DG_KEY_STORAGE) || '');
+  const [dgInput, setDgInput] = useState('');
+  const [showSetup, setShowSetup] = useState(false);
+  const [showKeys, setShowKeys] = useState(false);
+  const [shortcuts, setShortcuts] = useState(null);
+
+  const [messages, setMessages] = useState([
+    { role: 'assistant', content: 'Hi! I\'m your **HR Copilot**. Ask me anything — or tap the mic to speak.' },
+  ]);
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
 
+  const [isRecordingMic, setIsRecordingMic] = useState(false);
+  const [isRecordingSys, setIsRecordingSys] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+
+  // Keep a ref to latest messages so async callbacks don't use stale closure
+  const messagesRef = useRef(messages);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+
   const dragOffset = useRef({ x: 0, y: 0 });
   const overlayRef = useRef(null);
-  const messagesEndRef = useRef(null);
+  const endRef = useRef(null);
   const inputRef = useRef(null);
-  const msgId = useRef(1);
+  const micRecorderRef = useRef(null);
+  const sysRecorderRef = useRef(null);
+  const micChunks = useRef([]);
+  const sysChunks = useRef([]);
+  const activeStreams = useRef([]);
 
+  // Web mode: listen for open-copilot event
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, typing]);
-
-  useEffect(() => {
-    const handler = () => { setIsVisible(true); setIsMinimized(false); setTimeout(() => inputRef.current?.focus(), 100); };
-    window.addEventListener('open-copilot', handler);
-    return () => window.removeEventListener('open-copilot', handler);
+    if (IS_OVERLAY_WINDOW) return;
+    const h = () => {
+      setIsVisible(true);
+      setIsMinimized(false);
+      setTimeout(() => inputRef.current?.focus(), 100);
+    };
+    window.addEventListener('open-copilot', h);
+    return () => window.removeEventListener('open-copilot', h);
   }, []);
 
+  // Electron overlay window: receive shortcut info
+  useEffect(() => {
+    if (IS_OVERLAY_WINDOW) window.overlayAPI?.onShortcutsInfo?.((d) => setShortcuts(d));
+  }, []);
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, typing]);
+
+  // ── Dragging ────────────────────────────────────────────────
   const onMouseMove = useCallback((e) => {
     if (!isDragging) return;
-    setPosition({
-      x: Math.max(0, Math.min(window.innerWidth - 400, e.clientX - dragOffset.current.x)),
+    setPos({
+      x: Math.max(0, Math.min(window.innerWidth - 420, e.clientX - dragOffset.current.x)),
       y: Math.max(0, Math.min(window.innerHeight - 80, e.clientY - dragOffset.current.y)),
     });
   }, [isDragging]);
@@ -148,10 +167,9 @@ export default function InterviewCopilotOverlay() {
   const onMouseUp = useCallback(() => setIsDragging(false), []);
 
   useEffect(() => {
-    if (isDragging) {
-      window.addEventListener('mousemove', onMouseMove);
-      window.addEventListener('mouseup', onMouseUp);
-    }
+    if (!isDragging) return;
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
     return () => {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
@@ -159,55 +177,190 @@ export default function InterviewCopilotOverlay() {
   }, [isDragging, onMouseMove, onMouseUp]);
 
   const onHeaderMouseDown = (e) => {
-    if (e.target.closest('.copilot-icon-btn')) return;
+    if (e.target.closest('.cly-icon-btn')) return;
     const rect = overlayRef.current.getBoundingClientRect();
     dragOffset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     setIsDragging(true);
     e.preventDefault();
   };
 
-  function sendMessage(text) {
-    const q = text.trim();
+  // Click-through: disable when hovering card, restore on leave
+  const onCardMouseEnter = () => { if (IS_OVERLAY_WINDOW) window.overlayAPI.setClickThrough(false); };
+  const onCardMouseLeave = () => { if (IS_OVERLAY_WINDOW) window.overlayAPI.setClickThrough(true); };
+
+  function hideOverlay() {
+    if (IS_OVERLAY_WINDOW) window.overlayAPI.hide();
+    else setIsVisible(false);
+  }
+
+  // ── Send message (uses messagesRef to avoid stale closure) ──
+  async function sendMessage(text) {
+    const q = (text || '').trim();
     if (!q || typing) return;
-    setMessages(m => [...m, { id: msgId.current++, role: 'user', text: q }]);
+
+    const newHistory = [...messagesRef.current, { role: 'user', content: q }];
+    setMessages(newHistory);
     setInput('');
     setTyping(true);
-    const delay = 600 + Math.random() * 700;
-    setTimeout(() => {
-      const reply = buildResponse(q, candidates, departments, user);
-      setMessages(m => [...m, { id: msgId.current++, role: 'ai', text: reply }]);
+
+    try {
+      await new Promise(r => setTimeout(r, 800)); // Simulate latency
+      const reply = '*(Backend integration pending...)*';
+      setMessages(h => [...h, { role: 'assistant', content: reply }]);
+    } catch (err) {
+      setMessages(h => [...h, { role: 'assistant', content: `Error: ${err.message}` }]);
+    }
+    setTyping(false);
+  }
+
+  // ── Shared: stop recorder → transcribe → auto-send ──────────
+  async function stopAndSend(recorderRef, chunksRef, setRecording, isMic) {
+    if (!recorderRef.current) return;
+    setRecording(false);
+    setTranscribing(true);
+    try {
+      const streamToStop = recorderRef.current.stream;
+      const blob = await stopRecorder(recorderRef.current, chunksRef.current);
+      if (streamToStop) streamToStop.getTracks().forEach(t => t.stop());
+      
+      chunksRef.current = [];
+      recorderRef.current = null;
+
+      if (blob && blob.size > 500) {
+        const words = await transcribeAudio(blob, dgKey);
+        
+        let newMsgs = [];
+        if (Array.isArray(words) && words.length > 0) {
+          if (isMic) {
+            // Group words by speaker
+            let currentSpeaker = words[0].speaker;
+            let currentText = [];
+            
+            const getSpeakerLabel = (spk) => spk === 0 ? 'Speaker A' : 'Speaker B';
+            
+            words.forEach(w => {
+              if (w.speaker !== currentSpeaker) {
+                newMsgs.push({
+                  role: 'user', 
+                  content: `**${getSpeakerLabel(currentSpeaker)}:** ${currentText.join(' ')}`
+                });
+                currentSpeaker = w.speaker;
+                currentText = [];
+              }
+              currentText.push(w.punctuated_word || w.word);
+            });
+            
+            if (currentText.length > 0) {
+              newMsgs.push({
+                role: 'user', 
+                content: `**${getSpeakerLabel(currentSpeaker)}:** ${currentText.join(' ')}`
+              });
+            }
+          } else {
+            const sysText = words.map(w => w.punctuated_word || w.word).join(' ');
+            newMsgs.push({ role: 'user', content: `**Speaker:** ${sysText}` });
+          }
+        } else if (typeof words === 'string' && words.trim().length > 0) {
+          // Fallback if main.cjs hasn't been restarted and returned a string
+          newMsgs.push({ role: 'user', content: `**${isMic ? 'You (Mic)' : 'Speaker'}:** ${words}` });
+        }
+        
+        if (newMsgs.length > 0) {
+          setMessages(h => [...h, ...newMsgs]);
+          
+          setTyping(true);
+          await new Promise(r => setTimeout(r, 800)); // Simulate latency
+          const reply = '*(Backend integration pending...)*';
+          setMessages(h => [...h, { role: 'assistant', content: reply }]);
+          setTyping(false);
+        }
+      }
+    } catch (err) {
+      setMessages(h => [...h, { role: 'assistant', content: `Audio error: ${err.message}` }]);
       setTyping(false);
-    }, delay);
+    }
+    setTranscribing(false);
   }
 
-  function handleKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); }
+  // ── Recording Toggles ────────────────────────
+  async function toggleMicRecording() {
+    if (isRecordingMic) {
+      await stopAndSend(micRecorderRef, micChunks, setIsRecordingMic, true);
+      return;
+    }
+    if (!dgKey) { setShowSetup(true); return; }
+    try {
+      const micStream = await getMicStream();
+      activeStreams.current.push(micStream);
+      micChunks.current = [];
+
+      const mimeType = getSupportedMimeType();
+      const mr = new MediaRecorder(micStream, { mimeType });
+      micRecorderRef.current = mr;
+      mr.ondataavailable = e => { if (e.data.size > 0) micChunks.current.push(e.data); };
+      mr.start(250);
+      setIsRecordingMic(true);
+    } catch (err) {
+      alert(`Mic error: ${err.message}`);
+    }
   }
 
-  const userInitials = user?.avatar || 'HR';
+  async function toggleSysRecording() {
+    if (isRecordingSys) {
+      await stopAndSend(sysRecorderRef, sysChunks, setIsRecordingSys, false);
+      return;
+    }
+    if (!dgKey) { setShowSetup(true); return; }
+    try {
+      const sysStream = await getSpeakerStream();
+      activeStreams.current.push(sysStream);
+      sysChunks.current = [];
+
+      const mimeType = getSupportedMimeType();
+      const mr = new MediaRecorder(sysStream, { mimeType });
+      sysRecorderRef.current = mr;
+      mr.ondataavailable = e => { if (e.data.size > 0) sysChunks.current.push(e.data); };
+      mr.start(250);
+      setIsRecordingSys(true);
+    } catch (err) {
+      alert(`Speaker error: ${err.message}`);
+    }
+  }
+
+  function saveKeys() {
+    const dg = dgInput.trim();
+    if (dg) { localStorage.setItem(DG_KEY_STORAGE, dg); setDgKey(dg); }
+    if (dg) { setShowSetup(false); setDgInput(''); }
+  }
 
   function renderText(text) {
-    const parts = text.split(/(\*\*[^*]+\*\*)/g);
-    return parts.map((p, i) => p.startsWith('**') && p.endsWith('**')
-      ? <strong key={i}>{p.slice(2, -2)}</strong>
-      : p.split('\n').map((line, j) => j === 0 ? line : [<br key={j} />, line])
+    return text.split(/(\*\*[^*]+\*\*)/g).map((p, i) =>
+      p.startsWith('**') && p.endsWith('**')
+        ? <strong key={i}>{p.slice(2, -2)}</strong>
+        : p.split('\n').reduce(
+          (acc, line, j) => j === 0 ? [...acc, line] : [...acc, <br key={j} />, line],
+          []
+        )
     );
   }
 
-  if (!isVisible) {
+  const userInitials = user?.avatar || 'HR';
+  const isRecording = isRecordingMic || isRecordingSys;
+  const recording = isRecording;
+
+  if (!IS_OVERLAY_WINDOW && !isVisible) {
     return (
       <button className="copilot-reopen-btn" onClick={() => setIsVisible(true)}>
-        <span style={{ fontSize: 16 }}>🤖</span>
-        HR Copilot
+        <span style={{ fontSize: 14 }}>🤖</span> HR Copilot
       </button>
     );
   }
 
-  if (isMinimized) {
+  if (!IS_OVERLAY_WINDOW && isMinimized) {
     return (
       <button
         className="copilot-pill"
-        style={{ left: position.x, top: position.y }}
+        style={{ left: pos.x, top: pos.y }}
         onClick={() => setIsMinimized(false)}
       >
         <span className="copilot-pill-dot" />
@@ -216,101 +369,292 @@ export default function InterviewCopilotOverlay() {
     );
   }
 
+  const statusText = isRecording
+    ? 'Recording… click to stop & send'
+    : transcribing
+        ? 'Transcribing & sending…'
+        : 'Ready';
+
   return (
     <div
       ref={overlayRef}
       className={`copilot-overlay${isDragging ? ' dragging' : ''}`}
-      style={{ left: position.x, top: position.y }}
+      style={IS_OVERLAY_WINDOW ? {} : { left: pos.x, top: pos.y }}
+      onMouseEnter={onCardMouseEnter}
+      onMouseLeave={onCardMouseLeave}
     >
       {/* Header */}
-      <div className="copilot-header" onMouseDown={onHeaderMouseDown}>
-        <div className="copilot-header-left">
-          <div className="copilot-avatar">🤖</div>
-          <div className="copilot-title-wrap">
-            <span className="copilot-title">HR Copilot</span>
-            <span className="copilot-subtitle">Interview Intelligence</span>
+      <div className="cly-header" onMouseDown={onHeaderMouseDown}>
+        <div className="cly-logo">🤖</div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span className="cly-header-title">HR Copilot</span>
+            {IS_ELECTRON && (
+              <span style={{
+                fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 99,
+                background: 'rgba(99,102,241,0.25)', color: '#818cf8', letterSpacing: '0.4px',
+              }}>
+                {IS_OVERLAY_WINDOW ? 'OVERLAY' : 'ELECTRON'}
+              </span>
+            )}
           </div>
-          <span className="copilot-status-dot" />
+          <span className="cly-status">
+            <span className={`cly-dot${isRecording ? ' recording' : ''}`} />
+            {statusText}
+          </span>
         </div>
-        <div className="copilot-header-actions">
-          <button className="copilot-icon-btn" title="Minimize" onClick={() => setIsMinimized(true)}>
-            <MinusIcon />
+        <div className="cly-header-actions">
+          <button className="cly-icon-btn" title="Keyboard shortcuts" onClick={() => setShowKeys(k => !k)}>
+            <KeyIcon />
           </button>
-          <button className="copilot-icon-btn" title="Close" onClick={() => setIsVisible(false)}>
+          {!IS_OVERLAY_WINDOW && (
+            <button className="cly-icon-btn" title="Minimize" onClick={() => setIsMinimized(true)}>
+              <MinusIcon />
+            </button>
+          )}
+          <button
+            className="cly-icon-btn"
+            title="Close"
+            onClick={hideOverlay}
+            style={{ color: 'rgba(239,68,68,0.45)' }}
+            onMouseEnter={e => e.currentTarget.style.color = '#f87171'}
+            onMouseLeave={e => e.currentTarget.style.color = 'rgba(239,68,68,0.45)'}
+          >
             <XIcon />
           </button>
         </div>
       </div>
 
-      {/* Suggestion chips */}
-      <div className="copilot-suggestions">
-        {SUGGESTIONS.map(s => (
-          <button key={s} className="copilot-chip" onClick={() => sendMessage(s)}>{s}</button>
-        ))}
-      </div>
-
-      {/* Messages */}
-      <div className="copilot-messages">
-        {messages.map(msg => (
-          <div key={msg.id} className={`msg-row ${msg.role}`}>
-            <div className={`msg-avatar ${msg.role === 'ai' ? 'ai-avatar' : 'user-avatar'}`}>
-              {msg.role === 'ai' ? '🤖' : userInitials}
-            </div>
-            <div className={`msg-bubble ${msg.role}`}>
-              {renderText(msg.text)}
-            </div>
+      {/* Keyboard shortcuts panel */}
+      {showKeys && (
+        <div style={{
+          padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)',
+          background: 'rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column', gap: 6,
+        }}>
+          <div style={{
+            fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.3)',
+            textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 2,
+          }}>
+            {IS_ELECTRON ? 'Global Shortcuts' : 'Shortcuts'}
           </div>
-        ))}
-        {typing && (
-          <div className="msg-row ai">
-            <div className="msg-avatar ai-avatar">🤖</div>
-            <div className="msg-bubble ai" style={{ padding: '12px 14px' }}>
-              <div className="typing-indicator" style={{ padding: 0 }}>
-                <span className="typing-dot" />
-                <span className="typing-dot" />
-                <span className="typing-dot" />
+          {IS_ELECTRON ? [
+            ['Toggle overlay', shortcuts?.toggle || 'Ctrl+Shift+H'],
+            ['Move window', shortcuts?.move || 'Ctrl + Arrow Keys'],
+            ['Opacity +/-', shortcuts?.opacity || 'Ctrl+] / Ctrl+['],
+            ['Quit', 'Ctrl+Shift+Q'],
+          ].map(([label, key]) => (
+            <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>{label}</span>
+              <kbd style={{
+                fontSize: 10, fontFamily: 'monospace',
+                background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 5, padding: '2px 7px', color: 'rgba(255,255,255,0.65)',
+              }}>{key}</kbd>
+            </div>
+          )) : (
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>
+              Run <kbd style={{
+                fontFamily: 'monospace', background: 'rgba(255,255,255,0.08)',
+                padding: '1px 5px', borderRadius: 4, fontSize: 10,
+              }}>npm run electron:dev</kbd> for global shortcuts
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* API Key Setup */}
+      {showSetup ? (
+        <div className="cly-setup">
+          <div className="cly-setup-icon">🔑</div>
+          <div className="cly-setup-title">API Keys</div>
+          <div className="cly-setup-sub">
+            <strong style={{ color: '#6ee7b7' }}>Deepgram</strong> for voice → text
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+            <label style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Deepgram key {dgKey && <span style={{ color: '#6ee7b7' }}>✓ set</span>}
+            </label>
+            <input
+              className="cly-setup-input"
+              placeholder="paste Deepgram API key..."
+              type="password"
+              value={dgInput}
+              onChange={e => setDgInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && saveKeys()}
+              autoFocus
+            />
+          </div>
+
+          <button className="cly-setup-btn" onClick={saveKeys}>Save Key</button>
+          {dgKey && (
+            <button
+              onClick={() => setShowSetup(false)}
+              style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Suggestion chips */}
+          <div className="cly-suggestions">
+            {SUGGESTIONS.map(s => (
+              <button key={s} className="cly-chip" onClick={() => sendMessage(s)}>{s}</button>
+            ))}
+          </div>
+
+          {/* Messages */}
+          <div className="cly-messages">
+            {messages.map((msg, i) => (
+              <div key={i} className={`cly-msg-row ${msg.role === 'user' ? 'user' : 'ai'}`}>
+                <div className={`cly-msg-av ${msg.role === 'user' ? 'user' : 'ai'}`}>
+                  {msg.role === 'user' ? userInitials : '🤖'}
+                </div>
+                <div className={`cly-bubble ${msg.role === 'user' ? 'user' : 'ai'}`}>
+                  {renderText(msg.content)}
+                </div>
               </div>
-            </div>
+            ))}
+            {typing && (
+              <div className="cly-msg-row ai">
+                <div className="cly-msg-av ai">🤖</div>
+                <div className="cly-bubble ai">
+                  <div className="cly-typing"><span /><span /><span /></div>
+                </div>
+              </div>
+            )}
+            <div ref={endRef} />
           </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
 
-      {/* Input */}
-      <div className="copilot-input-area">
-        <textarea
-          ref={inputRef}
-          className="copilot-input"
-          placeholder="Ask about candidates, interviews, pipeline..."
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          rows={1}
-        />
-        <button
-          className="copilot-send-btn"
-          onClick={() => sendMessage(input)}
-          disabled={!input.trim() || typing}
-          title="Send"
-        >
-          <SendIcon />
-        </button>
-      </div>
 
-      {/* Footer */}
-      <div className="copilot-footer">
-        <p className="copilot-footer-text">AI support only · Final decisions stay with HR</p>
-      </div>
+
+          {/* Input row */}
+          <div className="cly-input-row">
+            <textarea
+              ref={inputRef}
+              className="cly-textarea"
+              placeholder={
+                transcribing
+                  ? 'Transcribing & sending…'
+                  : isRecording
+                    ? 'Listening… click button to stop & send'
+                    : 'Ask anything — or record audio to auto-send'
+              }
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); }
+              }}
+              rows={1}
+              disabled={transcribing}
+            />
+
+            {/* Mic button */}
+            <button
+              className={`cly-mic-btn${isRecordingMic ? ' active' : ''}`}
+              onClick={toggleMicRecording}
+              title={isRecordingMic ? 'Stop Mic' : 'Record Mic'}
+              disabled={!dgKey || transcribing}
+            >
+              <MicIcon recording={isRecordingMic} />
+            </button>
+
+            {/* Speaker button */}
+            <button
+              className={`cly-mic-btn${isRecordingSys ? ' active' : ''}`}
+              onClick={toggleSysRecording}
+              title={isRecordingSys ? 'Stop Speaker' : 'Record Speaker'}
+              disabled={!dgKey || transcribing}
+            >
+              <SpeakerIcon recording={isRecordingSys} />
+            </button>
+
+            <button
+              className="cly-send-btn"
+              onClick={() => sendMessage(input)}
+              disabled={!input.trim() || typing}
+              title="Send"
+            >
+              <SendIcon />
+            </button>
+          </div>
+
+          {/* Footer */}
+          <div className="cly-footer">
+            <span className="cly-footer-text">Deepgram · Backend pending · stop = auto-send</span>
+            <button className="cly-footer-key" onClick={() => setShowSetup(true)}>
+              {dgKey ? '🔑 Key set' : '⚠ Add API key'}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
+// ── Utilities ─────────────────────────────────────────────────
+
+// Pick a supported audio MIME type — Whisper accepts webm/ogg/mp4
+function getSupportedMimeType() {
+  const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+  return types.find(t => MediaRecorder.isTypeSupported(t)) || '';
+}
+
+// ── Icons ─────────────────────────────────────────────────────
+function KeyIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />
+    </svg>
+  );
+}
 function MinusIcon() {
-  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>;
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
 }
 function XIcon() {
-  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
 }
 function SendIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>;
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="22" y1="2" x2="11" y2="13" />
+      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+    </svg>
+  );
 }
+function MicIcon({ recording }) {
+  return recording
+    ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+    : (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+        <line x1="12" y1="19" x2="12" y2="23" />
+        <line x1="8" y1="23" x2="16" y2="23" />
+      </svg>
+    );
+}
+function SpeakerIcon({ recording }) {
+  return recording
+    ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+    : (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+      </svg>
+    );
+}
+
