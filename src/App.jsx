@@ -13,6 +13,9 @@ import AddCandidate from './pages/AddCandidate';
 import CandidateDetail from './pages/CandidateDetail';
 import Sidebar from './components/Sidebar';
 
+// True when Electron loads this page as the dedicated transparent overlay window
+const IS_OVERLAY_WINDOW = new URLSearchParams(window.location.search).get('overlay') === 'true';
+
 function AppInner() {
   const { user } = useAuth();
   const [page, setPage] = useState('dashboard');
@@ -63,17 +66,28 @@ function AppInner() {
   return (
     <div className="app-layout">
       <Sidebar activePage={page} onNavigate={navigate} />
-
       <main className="main-content">
         {renderPage()}
       </main>
-
-      <InterviewCopilotOverlay />
     </div>
   );
 }
 
 export default function App() {
+  // Overlay-window mode: render ONLY the copilot card, no HR app UI.
+  // Electron gives this window a 100% transparent background via window config.
+  if (IS_OVERLAY_WINDOW) {
+    return (
+      <AuthProvider>
+        <DataProvider>
+          <SocketProvider>
+            <InterviewCopilotOverlay overlayWindowMode />
+          </SocketProvider>
+        </DataProvider>
+      </AuthProvider>
+    );
+  }
+
   return (
     <AuthProvider>
       <DataProvider>
